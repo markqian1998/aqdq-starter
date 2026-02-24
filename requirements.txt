@@ -1,0 +1,20 @@
+# Core quantitative finance
+QuantLib-Python>=1.32
+
+# Numerical computing
+numpy>=1.24
+
+# Data handling
+pandas>=2.0
+
+# Market data (spot prices & dividends)
+yfinance>=0.2.36
+
+# HTTP (used by hibor_tma.py to fetch TMA HIBOR fixings)
+requests>=2.31
+
+# Visualisation (used in test_paths.py)
+matplotlib>=3.7
+
+# Optional: faster Excel reading for Bloomberg exports
+openpyxl>=3.1

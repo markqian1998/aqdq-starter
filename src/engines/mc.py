@@ -70,8 +70,13 @@ def price_aqdq_mc(
             lump_idx = 1
 
     # 2) Generate price paths (common random numbers ensure stable finite-difference Greeks)
+    # DEALER NOTE: fwd_drift(t=T) uses the zero rate at maturity T from the discount curve,
+    # minus dividend yield q, minus borrow spread b. This is the risk-neutral drift used by
+    # every tier-1 dealer for European-style barrier products. For long-dated trades with
+    # significant curve slope, a more refined approach uses per-step short rates — left as a
+    # future upgrade (LSV / hybrid IR pending).
     spots = gbm_paths_antithetic(
-        S0=mkt.spot, times=times, r_minus_q=mkt.fwd_drift(),
+        S0=mkt.spot, times=times, r_minus_q=mkt.fwd_drift(t=T),
         sigma=mkt.vol, n_paths=settings.n_paths, seed=settings.seed
     )
     S_T = spots[:, -1]
@@ -114,7 +119,7 @@ def price_aqdq_mc(
     def reprice(spot=None, vol=None):
         S0  = mkt.spot if spot is None else spot
         sig = mkt.vol  if vol  is None else vol
-        sp  = gbm_paths_antithetic(S0=S0, times=times, r_minus_q=mkt.fwd_drift(),
+        sp  = gbm_paths_antithetic(S0=S0, times=times, r_minus_q=mkt.fwd_drift(t=T),
                                    sigma=sig, n_paths=settings.n_paths, seed=settings.seed)
         ST  = sp[:, -1]
         sh, _, dsh = pathwise_shares_and_ko(

@@ -39,7 +39,51 @@ def infer_market(ticker: str, exchange_hint: Optional[str] = None) -> str:
 
 @dataclass
 class EquitySnapshot:
-    """Container for all market inputs required by the MC pricing engine."""
+    """Container for all market inputs required by the MC pricing engine.
+
+    Drift convention (risk-neutral GBM):
+        dS_t / S_t = (r - q - b) dt + sigma dW_t
+
+    where b = borrow_spread_bps / 10_000 is the stock borrow / repo spread
+    implied by the equity forward curve.
+
+    On the role of b — read carefully, the textbooks often muddle this:
+
+        The MARKET forward F = S * exp((r - q - b) * T) is what the dealer
+        quotes against; b is whatever spread is needed to reconcile the
+        observed forward with r and q. It is set by the equity-repo /
+        stock-loan market and is the same b for both sides of any trade
+        on that underlying — it is a property of the security, not the
+        product or the side.
+
+    Hedging interpretation (which side actually pays b in cash):
+
+      - Accumulator (AQ, client BUYS): dealer is net SHORT delta and hedges
+        by BUYING stock. The dealer is long the underlying and earns the
+        dividend, pays funding. NO stock-borrow needed. b is small for the
+        dealer's economics, but still flows through the forward used for
+        pricing because it is a market-observable input.
+
+      - Decumulator (DQ, client SELLS, also called "reverse accumulator"):
+        dealer is net LONG delta and hedges by SHORTING stock. The dealer
+        must borrow shares and pays the borrow rate b. This is where b
+        becomes a material P&L line for the dealer (~25% of margin on
+        hard-to-borrow names like HK small-caps with b = 200-500 bps).
+
+    Practical guidance:
+      - Liquid US large-caps (AVGO, NVDA, GOOGL, MSFT, etc.): b ≈ 0-5 bps,
+        immaterial — set borrow_spread_bps=0.
+      - Moderately tight US names: 25-100 bps.
+      - HK small-caps and special situations: 200-500+ bps. Especially
+        important for DQ trades.
+      - Always set b from desk-quoted borrow when available; the broker
+        usually has a "GC vs special" rate for each name.
+
+    drift_override (optional): forces fwd_drift() to return this value
+    regardless of curve / dividend / borrow. Used by scenario analysis
+    (bull/bear/flat real-world drifts) where we want to run the MC under
+    a non-risk-neutral assumption while keeping the discount curve intact.
+    """
     today: date
     spot: float
     vol: float
@@ -48,11 +92,15 @@ class EquitySnapshot:
     curve_ccy: str = "USD"                  # currency of the discount curve
     market: str = "US"                      # 'US' or 'HK'
     flat_r: float = 0.0                     # fallback flat rate when no curve is available
+    borrow_spread_bps: float = 0.0          # stock borrow / repo spread in basis points (b)
+    drift_override: Optional[float] = None  # real-world scenario override; bypasses r-q-b
 
     def df(self, t: float) -> float:
         """Return the discount factor for year-fraction t.
 
         Uses the discount curve when available; falls back to exp(-flat_r * t).
+        Discounting always uses the risk-free curve, regardless of drift_override.
+        (Discounting belongs to valuation; drift_override is for real-world simulation.)
         """
         if self.discount_curve is not None:
             try:
@@ -62,11 +110,22 @@ class EquitySnapshot:
         return math.exp(-self.flat_r * t)
 
     def fwd_drift(self, t: float | None = None) -> float:
-        """Return the risk-neutral drift r - q.
+        """Return the diffusion drift used by the GBM path generator.
 
-        If a discount curve is available and t is provided, r is derived from
-        the zero rate at that maturity; otherwise flat_r is used.
+        Risk-neutral default: r - q - b
+            r derived from the discount curve at maturity t (if available),
+            else flat_r.
+            q = div_yield.
+            b = borrow_spread_bps / 10_000.
+
+        If drift_override is set (e.g. for a bullish/bearish real-world scenario)
+        it is returned directly. The discount factor df() is unaffected — only
+        the simulation drift changes. This is the correct way to run
+        "what-if" macro views without contaminating the discounting.
         """
+        if self.drift_override is not None:
+            return float(self.drift_override)
+
         r = self.flat_r
         if self.discount_curve is not None and (t is not None) and (t > 0.0):
             try:
@@ -74,14 +133,28 @@ class EquitySnapshot:
                 r = float(zr.rate())
             except Exception:
                 pass
-        return r - self.div_yield
+        b = self.borrow_spread_bps / 10_000.0
+        return r - self.div_yield - b
 
     @classmethod
     def flat(cls, today: date, spot: float, vol: float, r: float, q: float,
-             market: str = "US", curve_ccy: str = "USD") -> "EquitySnapshot":
+             market: str = "US", curve_ccy: str = "USD",
+             borrow_spread_bps: float = 0.0) -> "EquitySnapshot":
         """Convenience constructor for a flat-rate snapshot (no term structure)."""
         return cls(today=today, spot=spot, vol=vol, div_yield=q,
-                   discount_curve=None, curve_ccy=curve_ccy, market=market, flat_r=r)
+                   discount_curve=None, curve_ccy=curve_ccy, market=market, flat_r=r,
+                   borrow_spread_bps=borrow_spread_bps)
+
+    def with_drift_override(self, drift: float) -> "EquitySnapshot":
+        """Return a shallow copy with drift_override set.
+
+        Used by multi-scenario analysis: same market state, different macro drift
+        assumptions (bullish / flat / bearish).
+        """
+        import copy
+        new = copy.copy(self)
+        new.drift_override = float(drift)
+        return new
 
 
 # ---------- Factory: auto-build snapshot with live curves ----------
@@ -94,6 +167,7 @@ def build_snapshot_auto(
     override_curve: Optional[ql.YieldTermStructureHandle] = None,
     override_div_yield: Optional[float] = None,
     spot_override: Optional[float] = None,
+    borrow_spread_bps: float = 0.0,
 ) -> EquitySnapshot:
     """Build an EquitySnapshot by auto-detecting market and loading the appropriate curve.
 
@@ -135,5 +209,6 @@ def build_snapshot_auto(
         today=today, spot=spot, vol=vol,
         div_yield=float(div or 0.0),
         discount_curve=curve, curve_ccy=curve_ccy, market=mkt,
-        flat_r=flat_r
+        flat_r=flat_r,
+        borrow_spread_bps=float(borrow_spread_bps),
     )

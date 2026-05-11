@@ -1,0 +1,69 @@
+# AVGO Accumulator — Phase 1 demo trade
+#
+# Mirrors the structure of the AI-generated NVDA draft but on AVGO,
+# matches Claire's bullish list (AI / semi theme), and routes through
+# our risk-neutral + bull/bear/flat scenario framework.
+#
+# To price:
+#     python aqdq_cli.py price trades/avgo_demo.yaml
+
+trade_id: AVGO_DEMO_001
+
+underlying:
+  ticker: AVGO
+  exchange: US
+  currency: USD
+
+terms:
+  product_type: AQ              # AQ = Accumulator (buy); DQ = Decumulator (sell)
+  side: buy
+  # Either give absolute strike OR % of spot. We use % so the trade
+  # auto-scales if we re-run with a different reference spot.
+  strike_pct_of_spot: 0.85      # 85% of spot
+  ko_pct_of_spot: 1.05          # 105% of spot
+  tenor_months: 12
+  observation: bi-weekly        # daily | weekly | bi-weekly | monthly
+  shares_per_period: 100        # 1× accumulation
+  gear_ratio: 2                 # 2× below strike (LNBD)
+  guarantee_periods: 2          # first 2 obs days have no KO (≈ 4 weeks)
+  cap_shares: 2600              # 26 periods × 100 shares × 1× = 2600 typical 1× cap
+  aq_mode: regular              # 'speedy' delivers GTD lump on day 2 instead
+  enable_pnbd: true
+
+market:
+  pricing_date: 2026-05-12
+  spot: 1340.50                 # Manual (yfinance auto-fetch when null)
+  flat_vol: 0.34                # Phase 1 placeholder; Phase 2 will use SVI surface
+  rate_curve: SOFR              # SOFR | HIBOR | FLAT
+  flat_rate: null               # only used when rate_curve = FLAT
+  div_yield: 0.012              # AVGO ~ 1.2% trailing
+  # Stock borrow / repo spread (in bps) implied by equity forward curve.
+  # Materiality depends on PRODUCT TYPE, not on the magnitude alone:
+  #   - AQ (client buys): dealer hedges by buying stock; b is small for dealer
+  #     economics but still flows through the forward used for pricing.
+  #   - DQ (client sells): dealer hedges by shorting stock and pays b directly
+  #     -> b is a primary dealer-margin component, especially HK small-caps.
+  # Liquid US large-caps: 0-5 bps. AVGO is liquid -> set to 0.
+  # HK small-caps / hard-to-borrow: 200-500+ bps.
+  borrow_spread_bps: 0
+  vol_input: flat               # 'surface' is Phase 2
+
+mc:
+  n_paths: 200000
+  seed: 20260512
+  settlement_mode: daily        # 'daily' = mark-to-market each obs; 'final' = lump at maturity
+
+scenarios:
+  # The ONLY scenario suitable for valuation / Greeks.
+  - name: risk_neutral
+    drift_pct: null             # drift = r - q - b from the curve
+
+  # Real-world stress views (PVs here are NOT fair values — pure illustration).
+  - name: bullish
+    drift_pct: 0.20             # +20% annualised log drift
+
+  - name: flat
+    drift_pct: 0.00
+
+  - name: bearish
+    drift_pct: -0.20            # the 'estimates are high' scenario Claire raised

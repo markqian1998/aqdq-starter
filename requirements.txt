@@ -18,3 +18,10 @@ matplotlib>=3.7
 
 # Optional: faster Excel reading for Bloomberg exports
 openpyxl>=3.1
+
+# --- Phase 1 additions ---
+# YAML trade config files
+pyyaml>=6.0
+
+# Word document generation (client-facing reports)
+python-docx>=1.0

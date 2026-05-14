@@ -7,13 +7,13 @@ from datetime import date
 import QuantLib as ql
 
 from src.market.snapshot import EquitySnapshot
-from src.engines.paths import gbm_paths_antithetic
+from src.engines.paths import gbm_paths_antithetic, gbm_paths_local_vol_antithetic
 from src.engines.payoff import pathwise_shares_and_ko, AQDQRuntimeState
 
 
 @dataclass
 class MCSettings:
-    n_paths: int = 200000   # number of Monte Carlo paths (more paths = lower noise, higher cost)
+    n_paths: int = 500000   # number of Monte Carlo paths (more paths = lower noise, higher cost)
     seed: int = 20250301    # random seed — fixing it ensures common random numbers for stable Greeks
     spot_bump: float = 0.01  # relative spot bump ±1% for Delta / Gamma
     vol_bump: float = 0.01   # absolute vol bump ±1 vol point for Vega
@@ -30,6 +30,34 @@ def yearfractions(dc: ql.DayCounter, today: date, obs_dates: list[date]) -> np.n
         dc = ql.Actual365Fixed()
     ql_today = ql.Date(today.day, today.month, today.year)
     return np.array([dc.yearFraction(ql_today, ql.Date(d.day, d.month, d.year)) for d in obs_dates], dtype=float)
+
+
+def _simulate_spots(
+    *,
+    mkt: EquitySnapshot,
+    times: np.ndarray,
+    T: float,
+    settings: MCSettings,
+    spot: float | None = None,
+    vol: float | None = None,
+    parallel_vol_bump: float = 0.0,
+) -> np.ndarray:
+    S0 = mkt.spot if spot is None else float(spot)
+    drift = mkt.fwd_drift(t=T)
+    if getattr(mkt, "vol_surface", None) is not None:
+        return gbm_paths_local_vol_antithetic(
+            S0=S0,
+            times=times,
+            r_minus_q=drift,
+            vol_fn=lambda t, s: mkt.path_vol(t, s, parallel_bump=parallel_vol_bump),
+            n_paths=settings.n_paths,
+            seed=settings.seed,
+        )
+    sigma = mkt.vol if vol is None else float(vol)
+    return gbm_paths_antithetic(
+        S0=S0, times=times, r_minus_q=drift,
+        sigma=sigma, n_paths=settings.n_paths, seed=settings.seed,
+    )
 
 
 def price_aqdq_mc(
@@ -61,6 +89,7 @@ def price_aqdq_mc(
 
     # GTD days remaining as of the valuation date
     gtd_rem = schedule.gtd_days_remaining(terms, rt.today, include_today_close=False)
+    effective_enable_pnbd = bool(enable_pnbd and getattr(terms, "enable_pnbd", True))
 
     # Speedy mode: determine the index in the remaining schedule for the lump-sum GTD grant
     # Rule: if at least two observation dates remain and GTD is not yet exhausted, use index 1 (day 2).
@@ -75,10 +104,7 @@ def price_aqdq_mc(
     # every tier-1 dealer for European-style barrier products. For long-dated trades with
     # significant curve slope, a more refined approach uses per-step short rates — left as a
     # future upgrade (LSV / hybrid IR pending).
-    spots = gbm_paths_antithetic(
-        S0=mkt.spot, times=times, r_minus_q=mkt.fwd_drift(t=T),
-        sigma=mkt.vol, n_paths=settings.n_paths, seed=settings.seed
-    )
+    spots = _simulate_spots(mkt=mkt, times=times, T=T, settings=settings)
     S_T = spots[:, -1]
 
     # 4) Compute per-path shares and KO indices
@@ -93,6 +119,7 @@ def price_aqdq_mc(
         side=terms.side, lnbd_dir=terms.lnbd_direction,
         aq_mode=getattr(terms, "aq_mode", "regular"),
         gtd_lump_index_in_remaining=lump_idx,
+        enable_pnbd=effective_enable_pnbd,
     )
     # total_shares: cumulative shares per path
     # ko_idx:       observation-day index of KO event (-1 if no KO)
@@ -116,11 +143,13 @@ def price_aqdq_mc(
     bump_S = settings.spot_bump
     bump_v = settings.vol_bump
 
-    def reprice(spot=None, vol=None):
+    def reprice(spot=None, vol=None, vol_bump: float = 0.0):
         S0  = mkt.spot if spot is None else spot
         sig = mkt.vol  if vol  is None else vol
-        sp  = gbm_paths_antithetic(S0=S0, times=times, r_minus_q=mkt.fwd_drift(t=T),
-                                   sigma=sig, n_paths=settings.n_paths, seed=settings.seed)
+        sp  = _simulate_spots(
+            mkt=mkt, times=times, T=T, settings=settings,
+            spot=S0, vol=sig, parallel_vol_bump=vol_bump,
+        )
         ST  = sp[:, -1]
         sh, _, dsh = pathwise_shares_and_ko(
             spots=sp, S_T=ST,
@@ -130,7 +159,8 @@ def price_aqdq_mc(
             gtd_days_remaining=gtd_rem, max_total_shares=terms.max_total_shares,
             delivered_to_date=rt.delivered_to_date, side=terms.side, lnbd_dir=terms.lnbd_direction,
             aq_mode=getattr(terms, "aq_mode", "regular"),
-            gtd_lump_index_in_remaining=lump_idx
+            gtd_lump_index_in_remaining=lump_idx,
+            enable_pnbd=effective_enable_pnbd,
         )
         if settlement_mode == "daily":
             dfs = np.array([mkt.df(t) for t in times], dtype=float)
@@ -142,7 +172,10 @@ def price_aqdq_mc(
     delta = (pv_up - pv_dn) / (mkt.spot * (1 + bump_S) - mkt.spot * (1 - bump_S))
     gamma = (pv_up - 2 * pv + pv_dn) / ((0.5 * (mkt.spot * (1 + bump_S) - mkt.spot * (1 - bump_S))) ** 2)
 
-    pv_vup, pv_vdn = reprice(vol=mkt.vol + bump_v), reprice(vol=max(1e-6, mkt.vol - bump_v))
+    if getattr(mkt, "vol_surface", None) is not None:
+        pv_vup, pv_vdn = reprice(vol_bump=bump_v), reprice(vol_bump=-bump_v)
+    else:
+        pv_vup, pv_vdn = reprice(vol=mkt.vol + bump_v), reprice(vol=max(1e-6, mkt.vol - bump_v))
     vega = (pv_vup - pv_vdn) / (2 * bump_v)
 
     ko_prob = float(np.mean(ko_idx >= 0))

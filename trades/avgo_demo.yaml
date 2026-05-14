@@ -26,7 +26,7 @@ terms:
   shares_per_period: 100        # 1× accumulation
   gear_ratio: 2                 # 2× below strike (LNBD)
   guarantee_periods: 2          # first 2 obs days have no KO (≈ 4 weeks)
-  cap_shares: 2600              # 26 periods × 100 shares × 1× = 2600 typical 1× cap
+  cap_shares: 5200              # 26 periods x shares_per_period x gear_ratio = theoretical max under continuous below-strike accumulation; override with real termsheet cap
   aq_mode: regular              # 'speedy' delivers GTD lump on day 2 instead
   enable_pnbd: true
 

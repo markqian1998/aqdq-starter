@@ -1,0 +1,51 @@
+# TSM US accumulator example using TSM volatility-parameter CSV and the UNH
+# term-sheet observation-period schedule supplied by the user.
+
+trade_id: TSM_AQ_SLV_UNH_SCHED
+
+underlying:
+  ticker: TSM
+  exchange: US
+  currency: USD
+
+terms:
+  product_type: AQ
+  side: buy
+  strike_pct_of_spot: 0.8139
+  ko_pct_of_spot: 1.20
+  tenor_months: 12
+  observation: daily
+  shares_per_period: 4
+  gear_ratio: 2
+  guarantee_periods: 37
+  cap_shares: 2000
+  aq_mode: regular
+  enable_pnbd: true
+
+schedule:
+  source: term_sheet_periods_csv
+  path: data/unh_periods.csv
+
+market:
+  pricing_date: 2026-05-12
+  spot: 399.80
+  flat_vol: 0.4606
+  rate_curve: SOFR
+  flat_rate: null
+  div_yield: 0.012
+  borrow_spread_bps: 0
+  vol_input: slv
+  vol_surface:
+    model: slv_param_curve
+    path: TSM_volatility_parameters.csv
+    put_moneyness: 0.80
+    call_moneyness: 1.20
+
+mc:
+  n_paths: 200000
+  seed: 20260512
+  settlement_mode: daily
+
+scenarios:
+  - name: risk_neutral
+    drift_pct: null

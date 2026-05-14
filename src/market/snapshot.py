@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 import math
 import QuantLib as ql
 
@@ -94,6 +94,7 @@ class EquitySnapshot:
     flat_r: float = 0.0                     # fallback flat rate when no curve is available
     borrow_spread_bps: float = 0.0          # stock borrow / repo spread in basis points (b)
     drift_override: Optional[float] = None  # real-world scenario override; bypasses r-q-b
+    vol_surface: Optional[Any] = None        # optional smile/local-vol surface for path generation
 
     def df(self, t: float) -> float:
         """Return the discount factor for year-fraction t.
@@ -156,6 +157,23 @@ class EquitySnapshot:
         new.drift_override = float(drift)
         return new
 
+    def with_vol_surface(self, vol_surface: Any) -> "EquitySnapshot":
+        """Return a shallow copy carrying a smile/local-vol surface."""
+        import copy
+        new = copy.copy(self)
+        new.vol_surface = vol_surface
+        return new
+
+    def path_vol(self, t: float, spot, *, parallel_bump: float = 0.0):
+        """Return path-generation volatility at time/state.
+
+        Flat-vol mode returns mkt.vol. Surface mode delegates to the loaded
+        volatility surface and applies a parallel vol bump for vega.
+        """
+        if self.vol_surface is not None:
+            return self.vol_surface.local_vol(t, spot, parallel_bump=parallel_bump)
+        return max(1e-6, float(self.vol) + float(parallel_bump))
+
 
 # ---------- Factory: auto-build snapshot with live curves ----------
 def build_snapshot_auto(
@@ -173,12 +191,14 @@ def build_snapshot_auto(
 
     Steps:
       1. Infer exchange (US / HK) from ticker or exchange_hint.
-      2. Fetch spot price and dividend yield (via prices.py / yfinance).
+      2. Fetch spot price and dividend yield (via prices.py / yfinance) if needed.
       3. Load discount curve: US -> SOFR; HK -> HIBOR (TMA).
       4. Return a ready-to-use EquitySnapshot for the MC engine.
     """
     mkt = infer_market(ticker, exchange_hint)
-    px  = get_spot_div_snapshot(ticker, today)
+    px = None
+    if spot_override is None or override_div_yield is None:
+        px = get_spot_div_snapshot(ticker, today)
     spot = spot_override if spot_override is not None else px.spot
     div  = override_div_yield if override_div_yield is not None else px.div_yield
 

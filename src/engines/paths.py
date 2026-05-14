@@ -19,6 +19,7 @@ After discretisation, the log-return over each step is normally distributed:
 """
 
 from __future__ import annotations
+from typing import Callable
 import numpy as np
 
 
@@ -64,6 +65,45 @@ def gbm_paths_antithetic(
 
     # Return price paths (exponentiate log-prices).
     # Output shape: (n_paths, n_steps); each row is a path, each column is an observation date.
+    return np.exp(logS)
+
+
+def gbm_paths_local_vol_antithetic(
+    S0: float,
+    times: np.ndarray,
+    r_minus_q: float,
+    vol_fn: Callable[[float, np.ndarray], np.ndarray],
+    n_paths: int = 1000000,
+    seed: int = 42,
+) -> np.ndarray:
+    """Simulate log-Euler paths with a state/time dependent local vol.
+
+    vol_fn receives (step_time, previous_spot_vector) and returns an annualised
+    volatility vector. Antithetic normal draws are preserved so finite-
+    difference Greeks remain stable, matching the flat-vol path generator's
+    Monte Carlo convention.
+    """
+    rng = np.random.default_rng(seed)
+    n_steps = len(times)
+    dt = np.diff(np.r_[0.0, times])
+
+    half = (n_paths + 1) // 2
+    Z = rng.standard_normal(size=(half, n_steps))
+    Z = np.vstack([Z, -Z])[:n_paths]
+
+    logS = np.full((n_paths, n_steps), np.log(S0))
+    prev_log = np.full(n_paths, np.log(S0), dtype=float)
+
+    for j in range(n_steps):
+        prev_spot = np.exp(prev_log)
+        vol = np.asarray(vol_fn(float(times[j]), prev_spot), dtype=float)
+        vol = np.maximum(vol, 1e-6)
+        mu = (r_minus_q - 0.5 * vol**2) * dt[j]
+        sig = vol * np.sqrt(dt[j])
+        next_log = prev_log + mu + sig * Z[:, j]
+        logS[:, j] = next_log
+        prev_log = next_log
+
     return np.exp(logS)
 
 # Typical uses of this output:

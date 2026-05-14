@@ -1,5 +1,5 @@
 # Core quantitative finance
-QuantLib-Python>=1.32
+QuantLib>=1.32
 
 # Numerical computing
 numpy>=1.24

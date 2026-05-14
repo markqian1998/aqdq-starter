@@ -44,7 +44,7 @@ import QuantLib as ql
 
 from src.market.snapshot import EquitySnapshot
 from src.engines.mc import MCSettings, yearfractions
-from src.engines.paths import gbm_paths_antithetic
+from src.engines.paths import gbm_paths_antithetic, gbm_paths_local_vol_antithetic
 from src.engines.payoff import pathwise_shares_and_ko, AQDQRuntimeState
 
 
@@ -223,6 +223,40 @@ def _sample_paths_for_plot(
     return spots[pick], ko_idx[pick]
 
 
+def _simulate_spots(
+    *,
+    mkt: EquitySnapshot,
+    times: np.ndarray,
+    T: float,
+    settings: MCSettings,
+    spot: Optional[float] = None,
+    vol: Optional[float] = None,
+    parallel_vol_bump: float = 0.0,
+) -> np.ndarray:
+    """Generate paths using flat vol or the snapshot's smile/local-vol surface."""
+    S0 = mkt.spot if spot is None else float(spot)
+    drift = mkt.fwd_drift(t=T)
+    if getattr(mkt, "vol_surface", None) is not None:
+        return gbm_paths_local_vol_antithetic(
+            S0=S0,
+            times=times,
+            r_minus_q=drift,
+            vol_fn=lambda t, s: mkt.path_vol(t, s, parallel_bump=parallel_vol_bump),
+            n_paths=settings.n_paths,
+            seed=settings.seed,
+        )
+
+    sigma = mkt.vol if vol is None else float(vol)
+    return gbm_paths_antithetic(
+        S0=S0,
+        times=times,
+        r_minus_q=drift,
+        sigma=sigma,
+        n_paths=settings.n_paths,
+        seed=settings.seed,
+    )
+
+
 # --------------------------------------------------------------------- #
 # Greeks helper (lifted out of mc.py so we can reuse with custom drift)
 # --------------------------------------------------------------------- #
@@ -242,13 +276,14 @@ def _compute_greeks(
     """Finite-difference Delta / Gamma / Vega with common random numbers."""
     bump_S = settings.spot_bump
     bump_v = settings.vol_bump
+    side_sign = -1.0 if terms.side == "sell" else 1.0
 
-    def reprice(spot=None, vol=None) -> float:
+    def reprice(spot=None, vol=None, vol_bump: float = 0.0) -> float:
         S0  = mkt.spot if spot is None else spot
         sig = mkt.vol  if vol  is None else vol
-        sp  = gbm_paths_antithetic(
-            S0=S0, times=times, r_minus_q=mkt.fwd_drift(t=T),
-            sigma=sig, n_paths=settings.n_paths, seed=settings.seed,
+        sp  = _simulate_spots(
+            mkt=mkt, times=times, T=T, settings=settings,
+            spot=S0, vol=sig, parallel_vol_bump=vol_bump,
         )
         ST  = sp[:, -1]
         sh, _, dsh = pathwise_shares_and_ko(
@@ -261,12 +296,13 @@ def _compute_greeks(
             lnbd_dir=terms.lnbd_direction,
             aq_mode=getattr(terms, "aq_mode", "regular"),
             gtd_lump_index_in_remaining=lump_idx,
+            enable_pnbd=getattr(terms, "enable_pnbd", True),
         )
         if settlement_mode == "daily":
             dfs = np.array([mkt.df(t) for t in times], dtype=float)
-            return float(np.mean(((sp - terms.forward_price) * dsh) @ dfs))
+            return side_sign * float(np.mean(((sp - terms.forward_price) * dsh) @ dfs))
         else:
-            return float(np.mean(mkt.df(T) * (ST - terms.forward_price) * sh))
+            return side_sign * float(np.mean(mkt.df(T) * (ST - terms.forward_price) * sh))
 
     pv_up = reprice(spot=mkt.spot * (1 + bump_S))
     pv_dn = reprice(spot=mkt.spot * (1 - bump_S))
@@ -274,8 +310,12 @@ def _compute_greeks(
     delta = (pv_up - pv_dn) / dS
     gamma = (pv_up - 2 * pv + pv_dn) / ((0.5 * dS) ** 2)
 
-    pv_vup = reprice(vol=mkt.vol + bump_v)
-    pv_vdn = reprice(vol=max(1e-6, mkt.vol - bump_v))
+    if getattr(mkt, "vol_surface", None) is not None:
+        pv_vup = reprice(vol_bump=bump_v)
+        pv_vdn = reprice(vol_bump=-bump_v)
+    else:
+        pv_vup = reprice(vol=mkt.vol + bump_v)
+        pv_vdn = reprice(vol=max(1e-6, mkt.vol - bump_v))
     vega = (pv_vup - pv_vdn) / (2 * bump_v)
 
     return {"delta": float(delta), "gamma": float(gamma), "vega": float(vega)}
@@ -322,9 +362,8 @@ def run_scenario_analysis(
 
     # --- path simulation ---
     drift_used = mkt.fwd_drift(t=T)
-    spots = gbm_paths_antithetic(
-        S0=mkt.spot, times=times, r_minus_q=drift_used,
-        sigma=mkt.vol, n_paths=settings.n_paths, seed=settings.seed,
+    spots = _simulate_spots(
+        mkt=mkt, times=times, T=T, settings=settings,
     )
     S_T = spots[:, -1]
 
@@ -340,6 +379,7 @@ def run_scenario_analysis(
         side=terms.side, lnbd_dir=terms.lnbd_direction,
         aq_mode=getattr(terms, "aq_mode", "regular"),
         gtd_lump_index_in_remaining=lump_idx,
+        enable_pnbd=getattr(terms, "enable_pnbd", True),
     )
 
     # --- valuation (risk-neutral interpretation if drift_override is None) ---

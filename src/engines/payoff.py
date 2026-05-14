@@ -65,7 +65,8 @@ def pathwise_shares_and_ko(
     side: str,                         # "buy" | "sell" (sign convention applied in the outer engine)
     lnbd_dir: str,                     # "below" | "above"  (typically "below" for AQ)
     aq_mode: str = "regular",          # "regular" or "speedy"
-    gtd_lump_index_in_remaining: Optional[int] = None  # speedy: index in remaining obs dates for lump grant (typically 1)
+    gtd_lump_index_in_remaining: Optional[int] = None,  # speedy: index in remaining obs dates for lump grant (typically 1)
+    enable_pnbd: bool = True,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute per-path share accumulation and KO events.
 
@@ -161,7 +162,7 @@ def pathwise_shares_and_ko(
             ko_index[(ko_index < 0) & hit] = i
 
             # PNBD: if KO occurs within GTD, deliver remaining GTD days at 1x (lump)
-            if np.any(hit) and i < gtd_days_remaining:
+            if enable_pnbd and np.any(hit) and i < gtd_days_remaining:
                 rem_idx = np.arange(i + 1, min(gtd_days_remaining, n_steps))
                 if rem_idx.size > 0:
                     hit_paths = np.where(hit)[0]

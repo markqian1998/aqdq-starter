@@ -29,6 +29,7 @@ from src.io.report import write_markdown_report, write_json_report
 from src.analytics.multi_scenario import run_all_scenarios
 from src.analytics.plots import save_all_plots
 from src.market.snapshot import build_snapshot_auto, EquitySnapshot
+from src.market.vol_surface import SLVParameterSurface
 from src.engines.payoff import AQDQRuntimeState
 
 
@@ -76,10 +77,26 @@ def _cmd_price(args: argparse.Namespace) -> int:
             borrow_spread_bps=cfg.borrow_spread_bps,
         )
 
+    vol_source = "flat"
+    if cfg.vol_input in {"slv", "surface", "local_vol", "slv_param_curve"}:
+        if not cfg.vol_surface_path:
+            print("[error] market.vol_surface.path is required when vol_input is slv", file=sys.stderr)
+            return 2
+        surface = SLVParameterSurface.from_csv(
+            cfg.vol_surface_path,
+            today=cfg.pricing_date,
+            put_moneyness=float(cfg.vol_surface_params.get("put_moneyness", 0.80)),
+            call_moneyness=float(cfg.vol_surface_params.get("call_moneyness", 1.20)),
+        )
+        mkt = mkt.with_vol_surface(surface)
+        mkt.vol = surface.atm_vol_at(1.0)
+        vol_source = cfg.vol_surface_model or "slv_param_curve"
+
     rt = AQDQRuntimeState(today=cfg.pricing_date, delivered_to_date=0.0)
 
     print(f"[info] {cfg.trade_id}: spot={mkt.spot:.2f}, "
           f"vol={mkt.vol:.2%}, "
+          f"vol_source={vol_source}, "
           f"drift(r-q-b)={mkt.fwd_drift(t=1.0):.2%}, "
           f"borrow={mkt.borrow_spread_bps:.0f}bps, "
           f"n_paths={cfg.mc.n_paths:,}, "

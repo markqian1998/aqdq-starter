@@ -109,7 +109,8 @@ def write_markdown_report(
         f"|  KO: **{_fmt_num(cfg.terms.ko_level)}** "
         f"({cfg.raw.get('terms', {}).get('ko_pct_of_spot', '—')} of spot)",
         f"- Spot used: **{_fmt_num(cfg.spot or 0.0)}**  |  "
-        f"Flat vol (Phase 1): **{_fmt_pct(cfg.flat_vol)}**  |  "
+        f"Vol input: **{cfg.vol_input}**"
+        f"{' (' + cfg.vol_surface_model + ')' if cfg.vol_surface_model else ''}  |  "
         f"Borrow spread: **{cfg.borrow_spread_bps:.0f} bps**",
         f"- Risk-neutral KO probability: **{_fmt_pct(rn.ko_probability)}**",
         f"- Risk-neutral expected shares: **{_fmt_int(rn.expected_shares)}**  |  "
@@ -151,10 +152,11 @@ def write_markdown_report(
         f"({rn.n_paths:,} paths).",
         f"- **Drift convention (risk-neutral):** r − q − b, where b is the "
         f"borrow / repo spread ({cfg.borrow_spread_bps:.0f} bps for this trade).",
-        "- **Vol input (Phase 1):** flat IV. *Phase 2 will replace this with a "
-        "calibrated SVI surface + Dupire local vol; flat vol systematically "
-        "over-states KO probability for KO products because equity skew "
-        "thins the right tail.*",
+        f"- **Vol input:** `{cfg.vol_input}`. Flat mode uses one scalar IV; "
+        "SLV parameter mode uses expiry-interpolated ATM forward and "
+        "put/ATM/call vol anchors as a bounded local-vol proxy. A full "
+        "production build would replace this with calibrated SVI + Dupire "
+        "local vol or full SLV.",
         "- **Greeks:** finite-difference bump-and-reprice with common random "
         "numbers (delta ±1%, vega ±1 vol point).",
         f"- **Settlement:** `{cfg.settlement_mode}` "

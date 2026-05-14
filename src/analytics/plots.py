@@ -78,7 +78,7 @@ def ko_timing_plot(result: ScenarioResult) -> mpl_fig.Figure:
 
     The 'no KO' bucket is shown separately on the far right.
     """
-    dist = result.ko_timing_distribution
+    dist = {int(k): float(v) for k, v in result.ko_timing_distribution.items()}
     no_ko_p = dist.get(-1, 0.0)
     ko_keys = sorted(k for k in dist.keys() if k >= 0)
     ko_probs = [dist[k] for k in ko_keys]

@@ -178,6 +178,42 @@ def tail_risk_plot(result: ScenarioResult) -> mpl_fig.Figure:
     return fig
 
 
+def pnl_return_buckets_plot(result: ScenarioResult) -> mpl_fig.Figure:
+    """Bar chart of client P&L return buckets.
+
+    Return is pathwise P&L divided by strike cash outlay, so 100% means the
+    path made profit equal to the cash used to buy accumulated shares.
+    """
+    buckets = getattr(result, "pnl_return_buckets", {}) or {}
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+    if not buckets:
+        ax.set_title("Client P&L return distribution (no data)")
+        return fig
+
+    labels = list(buckets.keys())
+    probs = [float(v) for v in buckets.values()]
+    colors = [
+        _COLOR_BARRIER if label.startswith("<") or label.startswith("-") else _COLOR_PRIMARY
+        for label in labels
+    ]
+    bars = ax.bar(labels, probs, color=colors, alpha=0.88, width=0.72)
+    ax.set_ylabel("Probability")
+    ax.set_xlabel("Path P&L / strike cash outlay")
+    ax.set_title(f"Client P&L return distribution — {result.scenario_name}")
+    ax.set_ylim(0, max(probs) * 1.25 if probs else 1.0)
+    ax.grid(alpha=0.3, axis="y")
+    ax.tick_params(axis="x", rotation=25)
+    for bar, p in zip(bars, probs):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + (max(probs) * 0.02 if probs else 0.01),
+            f"{p:.1%}",
+            ha="center", va="bottom", fontsize=9,
+        )
+    fig.tight_layout()
+    return fig
+
+
 # --------------------------------------------------------------------- #
 # Convenience: save all four plots for one scenario to a directory
 # --------------------------------------------------------------------- #
@@ -185,7 +221,8 @@ def tail_risk_plot(result: ScenarioResult) -> mpl_fig.Figure:
 def save_all_plots(result: ScenarioResult, out_dir: str, *, dpi: int = 130) -> dict:
     """Save the four standard plots as PNGs. Returns {plot_name: file_path}.
 
-    File names: paths.png, ko_timing.png, shares_dist.png, tail_risk.png.
+    File names: paths.png, ko_timing.png, shares_dist.png, tail_risk.png,
+    pnl_return.png.
     """
     from pathlib import Path
     out = Path(out_dir).expanduser()
@@ -196,6 +233,7 @@ def save_all_plots(result: ScenarioResult, out_dir: str, *, dpi: int = 130) -> d
         "ko_timing":   out / "ko_timing.png",
         "shares_dist": out / "shares_dist.png",
         "tail_risk":   out / "tail_risk.png",
+        "pnl_return":  out / "pnl_return.png",
     }
 
     figs = {
@@ -203,6 +241,7 @@ def save_all_plots(result: ScenarioResult, out_dir: str, *, dpi: int = 130) -> d
         "ko_timing":   ko_timing_plot(result),
         "shares_dist": shares_distribution_plot(result),
         "tail_risk":   tail_risk_plot(result),
+        "pnl_return":  pnl_return_buckets_plot(result),
     }
     for name, fig in figs.items():
         fig.savefig(paths[name], dpi=dpi, bbox_inches="tight")

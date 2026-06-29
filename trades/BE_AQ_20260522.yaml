@@ -1,0 +1,48 @@
+# BE US low-strike accumulator, priced from the user's updated spot/terms.
+
+trade_id: BE_AQ_20260522
+
+underlying:
+  ticker: BE
+  exchange: US
+  currency: USD
+
+terms:
+  product_type: AQ
+  side: buy
+  strike_pct_of_spot: 0.6189
+  ko_pct_of_spot: 1.25
+  tenor_months: 12
+  observation: daily
+  shares_per_period: 40
+  gear_ratio: 2
+  guarantee_periods: 37
+  cap_shares: 20000
+  aq_mode: regular
+  enable_pnbd: true
+  effective_date: 2026-05-22
+  final_accum_date: 2027-05-21
+
+market:
+  pricing_date: 2026-05-22
+  spot: 322.82
+  flat_vol: 0.9876
+  rate_curve: SOFR
+  flat_rate: null
+  div_yield: 0
+  borrow_spread_bps: 0
+  vol_input: slv
+  vol_surface:
+    model: slv_param_curve
+    path: data/vol_surfaces/BE_Vol_Surface_SLV_20260522.csv
+    put_moneyness: 0.80
+    call_moneyness: 1.20
+
+mc:
+  n_paths: 200000
+  seed: 20260522
+  settlement_mode: daily
+
+scenarios:
+  - name: risk_neutral
+    drift_pct: null

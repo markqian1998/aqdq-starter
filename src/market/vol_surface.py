@@ -136,7 +136,12 @@ class SLVParameterSurface:
 
 def _parse_expiry(value: str) -> date:
     text = str(value).strip().replace("Sept", "Sep")
-    return datetime.strptime(text, "%d %b %Y").date()
+    for fmt in ("%d %b %Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            pass
+    raise ValueError(f"Unsupported expiry date format: {value!r}")
 
 
 def _parse_float(value) -> float:

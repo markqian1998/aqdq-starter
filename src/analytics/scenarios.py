@@ -100,6 +100,14 @@ class ScenarioResult:
     p95_mtm: float
     prob_terminal_loss: float
 
+    # --- client-facing P&L return distribution ---
+    # Defined pathwise as discounted P&L / discounted strike cash outlay.
+    expected_pnl_return: float
+    median_pnl_return: float
+    p5_pnl_return: float
+    p95_pnl_return: float
+    pnl_return_buckets: Dict[str, float]
+
     # --- representative sample of paths for plotting ---
     sample_paths: np.ndarray = field(repr=False)   # shape (k, n_steps), k ~ 100
     sample_path_ko_idx: np.ndarray = field(repr=False)  # KO index for each sample path
@@ -162,6 +170,36 @@ def _histogram(values: np.ndarray, bins: int = 30) -> Dict[str, float]:
         f"{edges[i]:.2f}|{edges[i+1]:.2f}": float(h[i] / total)
         for i in range(len(h))
     }
+
+
+def _pnl_return_buckets(values: np.ndarray) -> Dict[str, float]:
+    """Client-facing return buckets for P&L / strike cash outlay.
+
+    Values are decimals, so 1.00 means +100% of deployed strike cash.
+    The high-return buckets are intentionally explicit because low-strike
+    accumulators often create investor questions around PnL 80-100% and
+    PnL >100% scenarios.
+    """
+    buckets = [
+        ("<= -50%", None, -0.50),
+        ("-50% to -25%", -0.50, -0.25),
+        ("-25% to 0%", -0.25, 0.00),
+        ("0% to 20%", 0.00, 0.20),
+        ("20% to 40%", 0.20, 0.40),
+        ("40% to 60%", 0.40, 0.60),
+        ("60% to 80%", 0.60, 0.80),
+        ("80% to 100%", 0.80, 1.00),
+        ("> 100%", 1.00, None),
+    ]
+    out: Dict[str, float] = {}
+    for label, lo, hi in buckets:
+        cond = np.ones_like(values, dtype=bool)
+        if lo is not None:
+            cond &= values >= lo
+        if hi is not None:
+            cond &= values < hi
+        out[label] = float(np.mean(cond))
+    return out
 
 
 def _build_tail_risk_table(
@@ -387,8 +425,10 @@ def run_scenario_analysis(
         dfs = np.array([mkt.df(t) for t in times], dtype=float)
         payoff_mat = (spots - terms.forward_price) * daily_shares
         pv_paths = payoff_mat @ dfs
+        cash_outlay_paths = (terms.forward_price * daily_shares) @ dfs
     elif settlement_mode == "final":
         pv_paths = mkt.df(T) * (S_T - terms.forward_price) * total_shares
+        cash_outlay_paths = mkt.df(T) * terms.forward_price * total_shares
     else:
         raise ValueError("settlement_mode must be 'final' or 'daily'")
 
@@ -446,6 +486,22 @@ def run_scenario_analysis(
     p95_mtm = float(np.percentile(pv_paths, 95))
     prob_loss = float(np.mean(pv_paths < 0))
 
+    # Client-facing P&L return: P&L as % of strike cash paid for accumulated
+    # shares. This is different from PV / maximum cap notional; it answers the
+    # investor's "what return did I make on the shares I was forced/allowed to
+    # buy?" question.
+    pnl_return = np.divide(
+        pv_paths,
+        cash_outlay_paths,
+        out=np.zeros_like(pv_paths, dtype=float),
+        where=(cash_outlay_paths > 0),
+    )
+    expected_pnl_return = float(np.mean(pnl_return))
+    median_pnl_return = float(np.median(pnl_return))
+    p5_pnl_return = float(np.percentile(pnl_return, 5))
+    p95_pnl_return = float(np.percentile(pnl_return, 95))
+    pnl_buckets = _pnl_return_buckets(pnl_return)
+
     # --- representative paths for plotting ---
     sample_paths, sample_ko_idx = _sample_paths_for_plot(
         spots=spots, ko_idx=ko_idx, k=sample_size_for_plots,
@@ -474,6 +530,11 @@ def run_scenario_analysis(
         p5_mtm=p5_mtm,
         p95_mtm=p95_mtm,
         prob_terminal_loss=prob_loss,
+        expected_pnl_return=expected_pnl_return,
+        median_pnl_return=median_pnl_return,
+        p5_pnl_return=p5_pnl_return,
+        p95_pnl_return=p95_pnl_return,
+        pnl_return_buckets=pnl_buckets,
         sample_paths=sample_paths,
         sample_path_ko_idx=sample_ko_idx,
         obs_dates=obs_rem,

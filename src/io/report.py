@@ -117,6 +117,9 @@ def write_markdown_report(
         f"Median: **{_fmt_int(rn.median_shares)}**  |  "
         f"p95: **{_fmt_int(rn.p95_shares)}**",
         f"- Risk-neutral PV: **{_fmt_money(rn.pv)}** (±{_fmt_money(rn.std_err)})",
+        f"- Median client P&L return: **{_fmt_pct(rn.median_pnl_return)}**  |  "
+        f"P(PnL 80-100%): **{_fmt_pct(rn.pnl_return_buckets.get('80% to 100%', 0.0))}**  |  "
+        f"P(PnL >100%): **{_fmt_pct(rn.pnl_return_buckets.get('> 100%', 0.0))}**",
         "",
     ]
 
@@ -182,6 +185,9 @@ def write_markdown_report(
         _row("p5 MTM",                        results, lambda r: _fmt_money(r.p5_mtm)),
         _row("p95 MTM",                       results, lambda r: _fmt_money(r.p95_mtm)),
         _row("P(terminal loss)",              results, lambda r: _fmt_pct(r.prob_terminal_loss)),
+        _row("Median client P&L return",      results, lambda r: _fmt_pct(r.median_pnl_return)),
+        _row("P(PnL 80-100%)",                results, lambda r: _fmt_pct(r.pnl_return_buckets.get("80% to 100%", 0.0))),
+        _row("P(PnL >100%)",                  results, lambda r: _fmt_pct(r.pnl_return_buckets.get("> 100%", 0.0))),
         "",
         "_PV / Greeks are only meaningful under the risk-neutral column. "
         "Bull / bear columns are real-world stress illustrations; their PV is "
@@ -229,9 +235,28 @@ def write_markdown_report(
             ]
     lines.append("")
 
-    # ---- 8. Embedded plots ----
+    # ---- 8. Client P&L return buckets ----
+    lines += ["## 8. Client P&L Return Distribution", ""]
+    lines += [
+        "Pathwise return is defined as discounted P&L divided by discounted "
+        "strike cash outlay for the shares accumulated on that path.",
+        "",
+    ]
+    for name, r in results.items():
+        lines += [f"### {name}", "", "| P&L return bucket | Probability |", "|---|---|"]
+        for label, prob in r.pnl_return_buckets.items():
+            lines.append(f"| {label} | {_fmt_pct(prob)} |")
+        lines += [
+            "",
+            f"- Expected return: **{_fmt_pct(r.expected_pnl_return)}**; "
+            f"median: **{_fmt_pct(r.median_pnl_return)}**; "
+            f"p5/p95: **{_fmt_pct(r.p5_pnl_return)} / {_fmt_pct(r.p95_pnl_return)}**.",
+            "",
+        ]
+
+    # ---- 9. Embedded plots ----
     if plot_files:
-        lines += ["## 8. Plots", ""]
+        lines += ["## 9. Plots", ""]
         for name, pf in plot_files.items():
             lines.append(f"### {name}")
             lines.append("")
@@ -241,9 +266,9 @@ def write_markdown_report(
                 lines.append(f"![{label}]({path})")
                 lines.append("")
 
-    # ---- 9. Analyst follow-up ----
+    # ---- 10. Analyst follow-up ----
     lines += [
-        "## 9. Analyst Follow-Up",
+        "## 10. Analyst Follow-Up",
         "",
         "- Phase 2: replace flat vol with SVI surface and Dupire local vol "
         "(captures skew → corrects KO probability).",
@@ -257,9 +282,9 @@ def write_markdown_report(
         "",
     ]
 
-    # ---- 10. Bottom line ----
+    # ---- 11. Bottom line ----
     lines += [
-        "## 10. Bottom Line",
+        "## 11. Bottom Line",
         "",
         f"Under the risk-neutral model, this {t.product_type} on {cfg.ticker} "
         f"has a **{_fmt_pct(rn.ko_probability)} KO probability**, "

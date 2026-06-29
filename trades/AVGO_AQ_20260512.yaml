@@ -7,7 +7,7 @@
 # To price:
 #     python aqdq_cli.py price trades/avgo_demo.yaml
 
-trade_id: AVGO_DEMO_001
+trade_id: AVGO_AQ_20260512
 
 underlying:
   ticker: AVGO

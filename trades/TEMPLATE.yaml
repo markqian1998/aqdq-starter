@@ -11,7 +11,7 @@
 #  其它都有合理默认值,看不懂的先别动。
 # =====================================================================
 
-trade_id: NEWTICKER_AQ_DEMO       # 【改】这笔交易的名字(报告文件名会用它),不要有空格
+trade_id: TICKER_AQ_YYYYMMDD      # 【改】命名规范: 标的_产品_定价日, 如 BE_AQ_20260522
 
 underlying:
   ticker: GOOGL                   # 【改】股票代码。美股直接写代码;港股写 "0700.HK"
@@ -50,10 +50,12 @@ market:
 
   # 来源B(精确,推荐): 用 Bloomberg/Derivitec 截图导出的 vol 参数 CSV
   # 把 vol_input 改成 slv, 取消下面 vol_surface 的注释, flat_vol 会被忽略
+  # vol CSV 统一放 data/vol_surfaces/, 命名: TICKER_Vol_Surface_SLV_YYYYMMDD.csv
+  # (vol 每天会动, 文件名带 as-of 日期, 旧的别覆盖, 留作历史)
   # vol_input: slv
   # vol_surface:
   #   model: slv_param_curve
-  #   path: GOOGL_volatility_parameters.csv   # 放在项目根目录
+  #   path: data/vol_surfaces/GOOGL_Vol_Surface_SLV_20260522.csv
   #   put_moneyness: 0.80
   #   call_moneyness: 1.20
 

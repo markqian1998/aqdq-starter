@@ -115,33 +115,45 @@ def _cmd_price(args: argparse.Namespace) -> int:
     )
 
     # --- Reports & plots ---
+    # Each run gets ONE self-contained folder so reports/ never turns into a
+    # flat pile of loose files. Layout:
+    #   reports/<run_name>/
+    #       report.md
+    #       report.json
+    #       plots/<scenario>/<plot>.png
     out_dir = Path(args.output_dir).expanduser().resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
     stamp = cfg.pricing_date.strftime("%Y%m%d")
-    base = out_dir / f"{cfg.trade_id}_{stamp}"
+    # Canonical run name: TICKER_<PRODUCT>_YYYYMMDD (e.g. BE_AQ_20260522).
+    # Derived from the trade's own fields — not the free-text trade_id — so the
+    # folder name is always consistent regardless of how trade_id was written.
+    ticker_clean = "".join(ch for ch in cfg.ticker.upper() if ch.isalnum())
+    run_name = f"{ticker_clean}_{cfg.terms.product_type}_{stamp}"
+    run_dir = out_dir / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
 
+    md_target = str(run_dir / "report.md")
     md_path = write_markdown_report(
-        cfg, results, str(base) + ".md",
+        cfg, results, md_target,
         plot_files=None,  # filled in below if plots are generated
     )
-    json_path = write_json_report(cfg, results, str(base) + ".json")
+    json_path = write_json_report(cfg, results, str(run_dir / "report.json"))
 
     plot_paths_per_scenario = {}
     if not args.no_plot:
         for name, r in results.items():
-            sc_dir = out_dir / f"{cfg.trade_id}_{stamp}_plots" / name
+            sc_dir = run_dir / "plots" / name
             plot_paths_per_scenario[name] = save_all_plots(r, str(sc_dir))
-        # Rewrite Markdown with plot embeds (relative paths from report's dir)
+        # Rewrite Markdown with plot embeds (paths relative to the report file,
+        # which now lives inside run_dir alongside the plots/ folder).
         relpaths = {
-            name: {k: str(Path(v).relative_to(out_dir)) for k, v in pf.items()}
+            name: {k: str(Path(v).relative_to(run_dir)) for k, v in pf.items()}
             for name, pf in plot_paths_per_scenario.items()
         }
-        md_path = write_markdown_report(cfg, results, str(base) + ".md", plot_files=relpaths)
+        md_path = write_markdown_report(cfg, results, md_target, plot_files=relpaths)
 
-    print(f"[ok] wrote {md_path}")
-    print(f"[ok] wrote {json_path}")
-    if plot_paths_per_scenario:
-        print(f"[ok] wrote {sum(len(v) for v in plot_paths_per_scenario.values())} plot file(s)")
+    print(f"[ok] wrote {run_dir}/")
+    print(f"[ok]   report.md + report.json"
+          + (f" + {sum(len(v) for v in plot_paths_per_scenario.values())} plots" if plot_paths_per_scenario else ""))
 
     # --- Console summary (one line per scenario) ---
     print()

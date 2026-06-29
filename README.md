@@ -28,7 +28,7 @@ pip install -r requirements.txt
 
 ## 📕 New here? Want to price a ticker without touching the code?
 
-See **[docs/HOW_TO_RUN.md](docs/HOW_TO_RUN.md)** — a step-by-step operations
+See **[HOW_TO_RUN.md](HOW_TO_RUN.md)** — a step-by-step operations
 manual: copy a template YAML, edit a few fields, run one command. No Python
 required.
 

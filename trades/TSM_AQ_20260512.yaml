@@ -1,7 +1,7 @@
 # TSM US accumulator example using TSM volatility-parameter CSV and the UNH
 # term-sheet observation-period schedule supplied by the user.
 
-trade_id: TSM_AQ_SLV_UNH_SCHED
+trade_id: TSM_AQ_20260512
 
 underlying:
   ticker: TSM
@@ -37,7 +37,7 @@ market:
   vol_input: slv
   vol_surface:
     model: slv_param_curve
-    path: TSM_volatility_parameters.csv
+    path: data/vol_surfaces/TSM_Vol_Surface_SLV_20260512.csv
     put_moneyness: 0.80
     call_moneyness: 1.20
 

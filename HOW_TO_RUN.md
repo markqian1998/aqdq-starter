@@ -37,7 +37,7 @@ pip install -r requirements.txt
 Verify it works by pricing the bundled demo:
 
 ```bash
-python3 aqdq_cli.py price trades/avgo_demo.yaml --paths 50000 --no-plot
+python3 aqdq_cli.py price trades/AVGO_AQ_20260512.yaml --paths 50000 --no-plot
 ```
 
 You should see a four-line scenario summary printed to the screen. If you do,
@@ -130,15 +130,22 @@ CSV with these exact columns:
 Expiry, ATM Fwd, ATM Vol, Put Vol, Call Vol, Skew, Smile, Call Wing, Put Wing
 ```
 
-See `BE_volatility_parameters.csv` in the project root for a working example.
-Place your CSV in the project root, then in the YAML:
+See `data/vol_surfaces/BE_Vol_Surface_SLV_20260522.csv` for a working example.
+
+**Where to put the CSV and how to name it.** All vol surfaces live in
+`data/vol_surfaces/`, named `TICKER_Vol_Surface_SLV_YYYYMMDD.csv` where the date
+is the **as-of date the surface was captured**. Volatility moves every day, so
+each pull is a new dated file — never overwrite yesterday's; keep them for
+history and reproducibility.
+
+Then in the YAML:
 
 ```yaml
 market:
   vol_input: slv
   vol_surface:
     model: slv_param_curve
-    path: GOOGL_volatility_parameters.csv
+    path: data/vol_surfaces/GOOGL_Vol_Surface_SLV_20260522.csv
     put_moneyness: 0.80
     call_moneyness: 1.20
 ```
@@ -170,13 +177,19 @@ Useful flags:
 
 ## Step 5 — Read the output
 
-Three things are written to `reports/`:
+Each run creates one self-contained folder, `reports/TICKER_AQ_YYYYMMDD/`,
+holding everything for that run:
 
-- **`<trade_id>_<date>.md`** — the human-readable risk note (open in any Markdown
-  viewer or VS Code preview).
-- **`<trade_id>_<date>.json`** — every number, for downstream tools.
-- **`<trade_id>_<date>_plots/`** — four charts per scenario: price paths, KO
-  timing, share-accumulation distribution, and the tail-risk bar chart.
+- **`report.md`** — the human-readable risk note (open in any Markdown viewer
+  or VS Code preview). Plot images are referenced by relative path, so you can
+  zip and share the whole folder and the charts still render.
+- **`report.json`** — every number, for downstream tools.
+- **`plots/<scenario>/`** — four charts per scenario: price paths, KO timing,
+  share-accumulation distribution, and the tail-risk bar chart.
+
+The folder name is derived automatically from the trade's ticker, product type,
+and pricing date — so reports stay consistently named no matter what you typed
+in `trade_id`.
 
 What the headline numbers mean:
 
@@ -199,21 +212,20 @@ What the headline numbers mean:
 ### A. Screen a new trade idea
 
 ```bash
-cp trades/TEMPLATE.yaml trades/idea.yaml
+cp trades/TEMPLATE.yaml trades/GOOGL_AQ_20260522.yaml   # TICKER_AQ_YYYYMMDD
 # edit ticker, spot, strike%, ko%, flat_vol
-python3 aqdq_cli.py price trades/idea.yaml --paths 50000 --no-plot
+python3 aqdq_cli.py price trades/GOOGL_AQ_20260522.yaml --paths 50000 --no-plot
 ```
 
 ### B. Mark-to-market an existing position
 
 1. Copy the original trade's YAML.
 2. Change `strike_pct_of_spot`/`ko_pct_of_spot` to **absolute** `strike`/`ko_level`
-   (the struck values).
+   (the struck values). This is the key step — see the warning under Step 2.
 3. Update `pricing_date` and `spot` to today.
-4. Refresh the vol surface CSV if the spot has moved materially.
+4. Refresh the vol surface CSV if the spot has moved materially (pull a new
+   `data/vol_surfaces/TICKER_Vol_Surface_SLV_<today>.csv` and point the YAML at it).
 5. Run.
-
-See `trades/be_aq_mtm_20260520.yaml` for a worked example.
 
 ---
 

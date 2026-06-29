@@ -26,6 +26,21 @@ pip install -r requirements.txt
 
 ---
 
+## 📕 New here? Want to price a ticker without touching the code?
+
+See **[docs/HOW_TO_RUN.md](docs/HOW_TO_RUN.md)** — a step-by-step operations
+manual: copy a template YAML, edit a few fields, run one command. No Python
+required.
+
+```bash
+cp trades/TEMPLATE.yaml trades/my_ticker.yaml   # edit the 7 fields marked 【改】
+python3 aqdq_cli.py price trades/my_ticker.yaml
+```
+
+The rest of this README is the developer / API reference.
+
+---
+
 ## Quick Start
 
 ### Price a Hong Kong Accumulator (981.HK)

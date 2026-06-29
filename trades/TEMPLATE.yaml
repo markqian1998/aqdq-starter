@@ -1,0 +1,82 @@
+# =====================================================================
+#  ACCUMULATOR TRADE TEMPLATE  —  复制这个文件,改成新 ticker 即可跑
+# =====================================================================
+#
+#  用法:
+#    1. 复制本文件:  cp trades/TEMPLATE.yaml trades/我的ticker.yaml
+#    2. 改下面标【改】的字段
+#    3. 跑:  python3 aqdq_cli.py price trades/我的ticker.yaml
+#
+#  最少需要改的 = 7 个字段:  trade_id / ticker / spot / strike / ko / vol / pricing_date
+#  其它都有合理默认值,看不懂的先别动。
+# =====================================================================
+
+trade_id: NEWTICKER_AQ_DEMO       # 【改】这笔交易的名字(报告文件名会用它),不要有空格
+
+underlying:
+  ticker: GOOGL                   # 【改】股票代码。美股直接写代码;港股写 "0700.HK"
+  exchange: US                    # 【改】US 或 HK
+  currency: USD                   # 【改】USD 或 HKD
+
+terms:
+  product_type: AQ                # AQ = 累计(客户买) / DQ = 减计(客户卖)
+  side: buy                       # AQ 用 buy, DQ 用 sell
+
+  # --- 行权价 / KO 两种写法,二选一 ---
+  # 写法A(推荐新单): 按 spot 的百分比, 系统自动算绝对价
+  strike_pct_of_spot: 0.85        # 【改】行权价 = 85% of spot (即 15% 折扣买)
+  ko_pct_of_spot: 1.05            # 【改】KO 障碍 = 105% of spot (涨 5% 就敲出终止)
+  # 写法B(给已成交的单做MTM时用): 直接写死绝对价,这样 spot 变了也不会改合约
+  # strike: 178.13
+  # ko_level: 375.23
+
+  tenor_months: 12                # 【改】期限(月)
+  observation: bi-weekly          # 观察频率: daily | weekly | bi-weekly | monthly
+  shares_per_period: 100          # 【改】每期买几股(1倍)
+  gear_ratio: 2                   # 跌破 strike 时翻几倍(通常 2)
+  guarantee_periods: 2            # 前几期保证不 KO (≈ 保护期)
+  cap_shares: 5200                # 累计上限。理论最大 = 总期数 × shares × gear
+  aq_mode: regular                # regular(每日累计) / speedy(GTD一次性发)
+  enable_pnbd: true               # KO 落在保证期内时是否补发剩余保证股数
+
+market:
+  pricing_date: 2026-05-22        # 【改】定价日(通常=今天)
+  spot: 175.00                    # 【改】当前股价。留 null 则自动从 yfinance 抓
+
+  # --- 波动率:两种来源,二选一 ---
+  # 来源A(最简单): 给一个固定 vol 数字。够用于快速看一笔
+  flat_vol: 0.32                  # 【改】32% 年化波动率
+  vol_input: flat                 # flat = 用上面的 flat_vol
+
+  # 来源B(精确,推荐): 用 Bloomberg/Derivitec 截图导出的 vol 参数 CSV
+  # 把 vol_input 改成 slv, 取消下面 vol_surface 的注释, flat_vol 会被忽略
+  # vol_input: slv
+  # vol_surface:
+  #   model: slv_param_curve
+  #   path: GOOGL_volatility_parameters.csv   # 放在项目根目录
+  #   put_moneyness: 0.80
+  #   call_moneyness: 1.20
+
+  rate_curve: SOFR                # SOFR(美股) / HIBOR(港股) / FLAT
+  flat_rate: null                 # 留 null 自动从曲线取
+  div_yield: 0                    # 股息率。留 null 自动抓
+  borrow_spread_bps: 0            # 借券利差(bps)。美股大盘 0;港股小盘 200-500
+
+  # 观察日程: 不写这块 = 系统按上面的 observation 频率自动生成(够用)
+  # 只有当你有 termsheet 给的精确日程表时才需要:
+  # (放在 market 同级,不是 market 里面)
+
+mc:
+  n_paths: 200000                 # 模拟路径数。快速看用 50000,正式报告 200000
+  seed: 20260522                  # 随机种子(固定它保证 Greeks 稳定)
+  settlement_mode: daily          # daily(逐日盯市) / final(到期一次结算)
+
+scenarios:                        # 跑哪些情景。第一个 risk_neutral 必留(估值用)
+  - name: risk_neutral            # 风险中性 = 唯一可用于估值/Greeks 的情景
+    drift_pct: null
+  - name: bearish                 # 下面三个是"真实世界"压力测试,只看风险不看估值
+    drift_pct: -0.20              # 假设每年跌 20%
+  - name: flat
+    drift_pct: 0.00               # 横盘
+  - name: bullish
+    drift_pct: 0.20               # 每年涨 20%

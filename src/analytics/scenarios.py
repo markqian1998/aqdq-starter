@@ -73,7 +73,7 @@ class ScenarioResult:
     # --- valuation / hedging (only meaningful under risk-neutral drift) ---
     pv: float
     std_err: float
-    greeks: Dict[str, float]                   # delta, gamma, vega
+    greeks: Dict[str, float]                   # delta, gamma, vega (absolute)
 
     # --- product-mechanic statistics (meaningful under any drift) ---
     ko_probability: float
@@ -123,6 +123,11 @@ class ScenarioResult:
     forward_price: float
     ko_level: float
     notional_cap_shares: Optional[float]
+
+    # --- normalized Greeks (cash + % of notional @strike and @spot) ---
+    # Placed last so the dataclass field ordering stays valid; defaults to {}
+    # for bull/bear scenarios where Greeks are not computed.
+    greeks_normalized: Dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializable view (numpy arrays → lists, dates → ISO strings)."""
@@ -359,6 +364,58 @@ def _compute_greeks(
     return {"delta": float(delta), "gamma": float(gamma), "vega": float(vega)}
 
 
+def _normalize_greeks(
+    greeks: Dict[str, float],
+    *,
+    spot: float,
+    cap_shares: Optional[float],
+    strike: float,
+) -> Dict[str, float]:
+    """Express the raw Greeks as cash amounts and as % of the trade notional.
+
+    DEALER NOTE: desks rarely look at raw Greeks alone — they read them next to
+    the position's notional so risk is comparable across trades of different
+    sizes. We report two normalisers because both are meaningful for an
+    accumulator whose strike sits well below spot:
+      - notional @ strike = cap_shares * strike  ("full-size" cost if the trade
+        runs to the cap and every share is bought at the contractual strike)
+      - notional @ spot   = cap_shares * spot     ("full-size" at today's price)
+
+    Conventions:
+      - delta_cash      = delta_shares * spot            ($ equity exposure)
+      - vega_cash       = vega                           (already $ per vol pt)
+      - gamma_cash_1pct = gamma * spot**2 / 100          (standard "dollar gamma":
+        the change in delta_cash for a 1% spot move)
+    Each is then divided by both notionals to give a percentage.
+    """
+    out: Dict[str, float] = {}
+    if cap_shares is None or not np.isfinite(cap_shares) or cap_shares <= 0:
+        # No cap → percentages are not well-defined; report cash only.
+        notional_strike = float("nan")
+        notional_spot = float("nan")
+    else:
+        notional_strike = float(cap_shares) * float(strike)
+        notional_spot = float(cap_shares) * float(spot)
+
+    out["spot"] = float(spot)
+    out["notional_at_strike"] = notional_strike
+    out["notional_at_spot"] = notional_spot
+
+    delta_cash = greeks.get("delta", float("nan")) * spot
+    vega_cash = greeks.get("vega", float("nan"))
+    gamma_cash_1pct = greeks.get("gamma", float("nan")) * (spot ** 2) / 100.0
+
+    out["delta_cash"] = float(delta_cash)
+    out["vega_cash"] = float(vega_cash)
+    out["gamma_cash_1pct"] = float(gamma_cash_1pct)
+
+    for label, cash in (("delta", delta_cash), ("vega", vega_cash), ("gamma", gamma_cash_1pct)):
+        out[f"{label}_pct_strike"] = float(cash / notional_strike) if np.isfinite(notional_strike) else float("nan")
+        out[f"{label}_pct_spot"] = float(cash / notional_spot) if np.isfinite(notional_spot) else float("nan")
+
+    return out
+
+
 # --------------------------------------------------------------------- #
 # Main entry point
 # --------------------------------------------------------------------- #
@@ -451,6 +508,16 @@ def run_scenario_analysis(
     else:
         greeks = {"delta": float("nan"), "gamma": float("nan"), "vega": float("nan")}
 
+    # Normalized Greeks (cash + % of notional). Only meaningful when Greeks
+    # were actually computed (risk-neutral); skip for bull/bear scenarios.
+    greeks_normalized = (
+        _normalize_greeks(
+            greeks, spot=mkt.spot,
+            cap_shares=terms.max_total_shares, strike=terms.forward_price,
+        )
+        if compute_greeks else {}
+    )
+
     # --- KO statistics ---
     ko_prob = float(np.mean(ko_idx >= 0))
     ko_dist = _ko_timing_distribution(ko_idx, n_steps=len(obs_rem))
@@ -513,6 +580,7 @@ def run_scenario_analysis(
         pv=pv,
         std_err=std_err,
         greeks=greeks,
+        greeks_normalized=greeks_normalized,
         ko_probability=ko_prob,
         ko_timing_distribution=ko_dist,
         expected_ko_period=expected_ko,

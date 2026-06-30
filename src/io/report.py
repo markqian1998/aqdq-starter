@@ -196,14 +196,31 @@ def write_markdown_report(
     ]
 
     # ---- 5. Risk-neutral Greeks ----
+    gn = rn.greeks_normalized or {}
+
+    def _pct_or_na(key: str) -> str:
+        v = gn.get(key)
+        return _fmt_pct(v) if (v is not None and v == v) else "n/a"  # v==v filters NaN
+
     lines += [
         "## 5. Risk-Neutral Greeks",
         "",
-        "| Greek | Value | Bump |",
-        "|---|---|---|",
-        f"| Delta | {_fmt_num(rn.greeks['delta'], 4)} | ±1% spot |",
-        f"| Gamma | {_fmt_num(rn.greeks['gamma'], 6)} | ±1% spot |",
-        f"| Vega  | {_fmt_num(rn.greeks['vega'], 2)} | ±1 vol pt |",
+        "Absolute, cash-equivalent, and as % of trade notional. Two notionals:",
+        f"**@strike** = cap × strike = {_fmt_money(gn.get('notional_at_strike', float('nan')))}, "
+        f"**@spot** = cap × spot = {_fmt_money(gn.get('notional_at_spot', float('nan')))}.",
+        "",
+        "| Greek | Absolute | Cash ($) | % notl @strike | % notl @spot | Bump |",
+        "|---|---|---|---|---|---|",
+        f"| Delta | {_fmt_num(rn.greeks['delta'], 1)} sh | {_fmt_money(gn.get('delta_cash', float('nan')))} | "
+        f"{_pct_or_na('delta_pct_strike')} | {_pct_or_na('delta_pct_spot')} | ±1% spot |",
+        f"| Gamma | {_fmt_num(rn.greeks['gamma'], 4)} | {_fmt_money(gn.get('gamma_cash_1pct', float('nan')))} | "
+        f"{_pct_or_na('gamma_pct_strike')} | {_pct_or_na('gamma_pct_spot')} | ±1% spot |",
+        f"| Vega  | {_fmt_money(rn.greeks['vega'])} | {_fmt_money(gn.get('vega_cash', float('nan')))} | "
+        f"{_pct_or_na('vega_pct_strike')} | {_pct_or_na('vega_pct_spot')} | ±1 vol pt |",
+        "",
+        "_Cash conventions: Delta cash = delta × spot (equity exposure); "
+        "Vega cash = $ per 1 vol point; Gamma cash = γ × spot² / 100 "
+        "($ change in delta-cash per 1% spot move)._",
         "",
     ]
 
